@@ -10,14 +10,26 @@ classdef CCPolytope % TODO: does it need to be an handle class?
         Vi_s % cell array of vertices
         E % configuration-constrained polytope of parameter
         
+        d % polytopic enclosure of the uncertainty set
+        
+    end
+    
+    properties(Dependent)
+        F % in H-rep (Ax<=b) for the CCPolytope, F=A. Defined for brevity
+    end
+    
+    methods % GETTER methods
+        function F = get.F(obj)
+            F = obj.ccPoly.A;
+        end
     end
     
     methods
         function obj = CCPolytope(varargin)
             % Two admissible cases for inputs:
-            % {dynSys, F} : use directly a provided CC-template (exp. useful for dim=2)
+            % {dynSys, F} : use directly a provided CC-template (useful for dim=2)
             % {dynSys, C_tilde, D} : compute a valid CC-template (suggested for dim >=3)
-            switch length(varargin)
+            switch nargin
                 case 2
                     F = varargin{2};
                 case 3
@@ -35,6 +47,8 @@ classdef CCPolytope % TODO: does it need to be an handle class?
             obj.m_bar = length(obj.Vi_s);
             
             obj.E = sparse(obj.computeEMatrix());
+            
+            obj.d = obj.sys.W_dist.support(F');
         end
     end
     
@@ -65,7 +79,7 @@ classdef CCPolytope % TODO: does it need to be an handle class?
             
         end
         
-        function F = getCCTemplateMatrixCASADI(obj,sys,C_tilde,D)
+        function F = getCCTemplateMatrixCASADI(~,sys,C_tilde,D)
             % - firstly, we get a user defined C_tilde (by using m and nx, we
             % decide template complexity)
             % - then, we compute with the opt. problem a proper transformation matrix
@@ -122,7 +136,11 @@ classdef CCPolytope % TODO: does it need to be an handle class?
             costFun = sum(abs(epsilon));
             
             opti.minimize(costFun);
-            opti.solver('ipopt')
+            
+            % set print_level=0 and print_time=0 to remove any debug output
+            ipopt = struct('print_level',3,'sb','yes');
+            opti_opts = struct('ipopt', ipopt, 'print_time', 1);
+            opti.solver('ipopt',opti_opts)
             
             % non-zero initial condition for matrices
             opti.set_initial(W, eye(nx));
