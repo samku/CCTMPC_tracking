@@ -1,7 +1,4 @@
 classdef DynSystem < handle
-    %DYNSYS Summary of this class goes here
-    %   Detailed explanation goes here
-    
     % The system is expressed as x+ = Ax+Bu+w, where (A,B) \in \Delta,
     % convex hull of different realizations.
     
@@ -10,15 +7,17 @@ classdef DynSystem < handle
         B_convh % Convex hull of input matrices
         C, D    % state and input output matrices
         X       % State constraints
-        U       % Input constraints 
+        U       % Input constraints
         W_dist  % Disturbance constraints
+    end
+    
+    properties (Access = private)
+        A_curr_han, B_curr_han  % function handle to get current system realization
     end
     
     properties(Dependent)
         nx, nu, ny  % state input and output dimensions
         np          % #vertices of convex hull
-        
-        % TODO: get actual realization!
     end
     
     methods % GETTER methods
@@ -37,30 +36,38 @@ classdef DynSystem < handle
     end
     
     methods (Access = public)
-        function obj = DynSystem(A_convh, B_convh, C, D, X, U, W_dist)
-            %DYNSYS Construct an instance of this class
-            %   Detailed explanation goes here
+        function obj = DynSystem(A_convh, B_convh, C, D, X, U, W_dist, A_curr_han, B_curr_han)
             obj.A_convh = A_convh;
             obj.B_convh = B_convh;
-            obj.C = C; 
+            obj.C = C;
             obj.D = D;
             obj.X = X;
             obj.U = U;
             obj.W_dist = W_dist;
+            obj.A_curr_han = A_curr_han;
+            obj.B_curr_han = B_curr_han;
         end
         
         function updateSysMatrices(obj, A_convh_new, B_convh_new)
-        % used for online model refinement
+            % used for online model refinement
             obj.A_convh = A_convh_new;
             obj.B_convh = B_convh_new;
         end
         
-        function x_next = step(obj, x0, u0)
-            % TODO: define A_curr and B_curr! maybe passing a function
-            % handle to define how to compute them?
-            x_next = A_curr*x0+ B_curr*u0 + obj.W_dist.randomPoint();
+        function x_next = step(obj, x, u, varargin)
+            % varargin define the parameter vector for an LPV system
+            x_next = obj.A_curr(varargin)*x + obj.B_curr(varargin)*u ...
+                + obj.W_dist.randomPoint();
+        end
+        
+        function A_curr = A_curr(obj,varargin)
+            A_curr = obj.A_curr_han(obj.A_convh,varargin{:}); % params
+        end
+        
+        function B_curr = B_curr(obj,varargin)
+            B_curr = obj.B_curr_han(obj.B_convh,varargin{:}); % params
         end
         
     end
+    
 end
-
