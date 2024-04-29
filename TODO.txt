@@ -1,8 +1,0 @@
-- Create the Limon RTMPC class based on Sampath implementation
-- Implement for both CCTMPC and Limon RTMPC the computation of region of attraction. It will be a polytope, so we can check the dimension to avoid recomputing by error if already computed with that level of detail (or gamma!)
-
-- implement the plotting part: it must take the results for each step of the computation and save it in a storageClass
-
-- do everything for the 4D example.
-
--write both the readme in markdown and add the license suggested by Bemporad.
