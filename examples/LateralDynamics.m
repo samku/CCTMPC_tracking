@@ -44,10 +44,10 @@ C_tilde = [eye(nx); -eye(nx)];
 ccPoly = CCPolytope(sys, C_tilde, C_tilde); % (sys,C_tilde,Dist)
 
 % Cost Function definition: we can pass either structs of matrices, or
-% function handle directly defined (just be sure that the function is
+% function handles defined externally. Just be sure that the function is
 % -strictly- convex, and that the function signatures are:
-% OTI_cost : @(ys, us, r, th_s)
-% Stage/Term_cost :  @(y_k,u_k,ys,us)
+% RCI_cost : @(ys, us, r, th_s)
+% Stage/Term_cost : @(y_k/N,u_k/N,ys,us)
 RCI_cost = struct(  "Qv",blkdiag(0.001*eye(nx), 0.01*eye(nu)),...
     "Qc",blkdiag(100*eye(nx), 0.01*eye(nu)),...
     "Qr",10*eye(ny) );
@@ -118,7 +118,7 @@ projVerts = cell(1,6);
 for t = 1:N_mpc
     % (y_cells,projs), each cell has two vertices
     ccPolyProjs = projPolytope(ccPoly.F,{OCP_y{t},OCP_ys{t},RCI_ys{t}},[1,3]);
-    % iterate through time
+    % iterate over time
     for i = 1:numel(ccPolyProjs)
         projVerts{i} = [projVerts{i}, ccPolyProjs{i}'];
     end

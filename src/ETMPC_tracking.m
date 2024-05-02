@@ -54,7 +54,7 @@ classdef ETMPC_tracking < handle
     
     methods (Access = public)
         function obj = ETMPC_tracking(sys, ccPoly, costMatricesSS, N, lambda, sdp_opts)
-            assert(sys.np == 1, "Cannot proceed. ETMPC from Limon is defined for only LTI systems.")
+            assert(sys.np == 1, "Cannot proceed. ETMPC is defined for only LTI systems.")
             
             obj.sys = sys;
             obj.ccPoly = ccPoly;
@@ -165,7 +165,7 @@ classdef ETMPC_tracking < handle
             HU = obj.sys.U.A; hU = obj.sys.U.b;
             m = obj.ccPoly.m;
             
-            % compute mRPI facet configuration (as Limon). LQR solutions
+            % compute mRPI facet configuration (as P.Trodden). LQR solutions
             % are assigned inside this method
             obj.y_mRPI = obj.get_mRPI_facets();
             
@@ -333,7 +333,7 @@ classdef ETMPC_tracking < handle
         
         
         function y_mRPI = get_mRPI_facets(obj)
-            % Limon mRPI set
+            % P.Trodden mRPI set
             A = obj.sys.A_curr(); B = obj.sys.B_curr();
             
             [obj.K, obj.P] = dlqr(A, B, obj.costMats.Qc_x, obj.costMats.Qc_u);

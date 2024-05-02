@@ -50,10 +50,10 @@ C_tilde = getTemplateMatrix(nx,16);
 ccPoly = CCPolytope(sys, C_tilde);
 
 % Cost Function definition: we can pass either structs of matrices, or
-% function handle directly defined (just be sure that the function is
+% function handles defined externally. Just be sure that the function is
 % -strictly- convex, and that the function signatures are:
 % RCI_cost : @(ys, us, r, th_s)
-% Stage/Term_cost :  @(y_k,u_k,ys,us)
+% Stage/Term_cost : @(y_k/N,u_k/N,ys,us)
 RCI_cost = struct(  "Qv",blkdiag(10*eye(nx),eye(nu)),...
     "Qc",blkdiag(eye(nx),eye(nu)),...
     "Qr",eye(ny) );
@@ -65,7 +65,7 @@ gamma = 0.95;
 costFunMan = CostFunctionManager(sys, ccPoly, RCI_cost, Qcost_han, Pcost_han);
 
 % build the MPC scheme
-solver_opts = {'solver','cplex','verbose',0};
+solver_opts = {'solver','gurobi','verbose',0};
 N_ocp = 5;
 variableConvh = false; % used as flag for OptimalController class (faster code)
 useBasicOCP = false;
