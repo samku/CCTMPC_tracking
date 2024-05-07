@@ -191,7 +191,7 @@ classdef OptimalController_basic < handle
                 constr = [constr;   obj.sys.X.A*obj.ccPoly.Vi_s{j}*y <= obj.sys.X.b;    obj.sys.U.A*u(:,j) <= obj.sys.U.b];
                 
             end
-            constr = [constr; obj.ccPoly.E*y <= zeros(size(obj.ccPoly.E,1),1)];
+            constr = [constr; obj.ccPoly.E*y <= 0];
         end
         
     end

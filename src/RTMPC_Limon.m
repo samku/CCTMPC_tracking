@@ -44,7 +44,7 @@ classdef RTMPC_Limon < handle
                 feasReg = obj.feasRegion;
             else
                 % Hard-coded #facets, often enough to get a good approximation
-                obj.feasRegion = obj.computeFeasRegion(100);
+                obj.feasRegion = obj.computeFeasRegion(200);
                 feasReg = obj.feasRegion;
             end
         end
@@ -175,10 +175,20 @@ classdef RTMPC_Limon < handle
             A_aug = [A+B*K, B*Mu-B*K*Mx; 
                 zeros(nu,nx), eye(nu)];
             
-            % compute tightened X/U constraint sets (using the polytopic
-            % overapproximation of the mRPI set).
-            obj.hX_tight = hX - Polyhedron(obj.ccPoly.F, obj.y_mRPI).support(-HX');
-            obj.hU_tight = hU - Polyhedron(obj.u_mRPI').support(-HU');
+            % compute tightened X/U constraint sets
+            obj.hX_tight = zeros(size(hX)); obj.hU_tight = zeros(size(hU));
+            for i=1:length(hX)
+                xx = cplexlp(-HX(i,:)',obj.ccPoly.F,obj.y_mRPI);
+                obj.hX_tight(i) = hX(i) - HX(i,:)*xx;
+            end
+            U_mRPI_set = Polyhedron(obj.u_mRPI').minHRep();
+            HU_mRPI = U_mRPI_set.A; hU_mRPI = U_mRPI_set.b;
+            for i=1:length(hU)
+                uu = cplexlp(-HU(i,:)',HU_mRPI,hU_mRPI);
+                obj.hU_tight(i) = hU(i) - HU(i,:)*uu;
+            end
+%             obj.hX_tight = hX - Polyhedron(obj.ccPoly.F, obj.y_mRPI).support(-HX');
+%             obj.hU_tight = hU - Polyhedron(obj.u_mRPI').support(-HU');
             
             % Compute the augmented constraint set
             H_aug = [HX, zeros(size(HX,1),nu);
@@ -195,14 +205,21 @@ classdef RTMPC_Limon < handle
             % the terminal set from above (volume of the set diminishes at
             % each iteration)
             H_RPI = H_aug; h_RPI = h_aug;
-            for t=1:50 % hard-coded value, for a sufficiently tight approx.
-                H_LHS = [H_RPI*A_aug; H_aug];   h_RHS = [h_RPI; h_aug];
-                termSetAug = Polyhedron(H_LHS,h_RHS).minHRep();
-
-                if Polyhedron(H_RPI,h_RPI).minHRep() == termSetAug
-                    break % we converged to the exact lambda-mRPI set
-                else
-                    H_RPI = termSetAug.A;     h_RPI = termSetAug.b;
+            for t=1:100 % hard-coded exit condition, usually suff. tight approx.
+                H_LHS = [H_RPI*A_aug; H_aug];   
+                h_LHS = [h_RPI; h_aug];
+                termSetAug = Polyhedron(H_LHS,h_LHS).minHRep();
+                H_RPI = termSetAug.A;    
+                h_RPI = termSetAug.b;
+                
+                % Verify invariance H(Ax+d)<=h for all x:Hx<=h
+                new_h_RPI = zeros(size(h_RPI));
+                for i=1:size(h_RPI,1)
+                    xx = cplexlp(-(H_RPI(i,:)*A_aug)',H_RPI,h_RPI);
+                    new_h_RPI(i) = H_RPI(i,:)*A_aug*xx;
+                end
+                if max(new_h_RPI-h_RPI)<=1e-6
+                   break
                 end
             end
         end
@@ -258,7 +275,7 @@ classdef RTMPC_Limon < handle
             thetas = sdpvar(obj.ccPoly.m_bar, 1,'full');
             
             constr = [];
-            constr = [constr; sum(thetas)==1; thetas >= zeros(size(thetas))];
+            constr = [constr; sum(thetas)==1; thetas >= 0];
             
             x_vert = [];
             for k=1:obj.ccPoly.m_bar
@@ -294,7 +311,7 @@ classdef RTMPC_Limon < handle
             cost = -c_vec'*x0; % maximize the direction
             
             % initial condition & steady-state constraints
-            constr = [obj.ccPoly.F*x0 <= obj.y_mRPI + obj.ccPoly.F*x(:,1); % initial condition
+            constr = [obj.ccPoly.F*(x0-x(:,1)) <= obj.y_mRPI; % initial condition
                 obj.sys.X.A*Mx*theta <= obj.sys.X.b;
                 obj.sys.U.A*Mu*theta <= obj.sys.U.b];
             

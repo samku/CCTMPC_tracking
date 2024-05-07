@@ -18,9 +18,9 @@ B = [0.5;1];        nu = size(B,2);
 Bw = [1 0; 0 1];    nw = size(Bw,2);
 
 % Constraints
-HX = [eye(nx); -eye(nx)]; hX = [5;3;5;2];       mX = size(HX,1);
-HU = [eye(nu); -eye(nu)]; hU = [2;1];           mU = size(HU,1);
-HW = [eye(nx); -eye(nx)]; hW = [0;0.5;0;0.5];   mW = size(HW,1);
+HX = [eye(nx); -eye(nx)]; hX = [5;3;5;2];
+HU = [eye(nu); -eye(nu)]; hU = [2;1];
+HW = [eye(nx); -eye(nx)]; hW = [0;0.5;0;0.5];
 
 % Output
 C = [1, 0]; ny = size(C,1);
@@ -44,9 +44,9 @@ B_curr_han = @(B_convh,params) B_convh{1};
 sys = DynSystem(A_convh, B_convh, C, D, X, U, W_dist,A_curr_han,B_curr_han);
 % -----------------------
 
-% By using polar coordinates for parameterization, we ensure to get
+% By using polar coordinates m_barfor parameterization, we ensure to get
 % a CCPolytope with minimal representation, i.e. m_bar = m
-C_tilde = getTemplateMatrix(nx,16);
+C_tilde = getTemplateMatrix(nx,12);
 ccPoly = CCPolytope(sys, C_tilde);
 
 % Cost Function definition: we can pass either structs of matrices, or
@@ -56,10 +56,10 @@ ccPoly = CCPolytope(sys, C_tilde);
 % Stage/Term_cost : @(y_k/N,u_k/N,ys,us)
 RCI_cost = struct(  "Qv",blkdiag(10*eye(nx),eye(nu)),...
     "Qc",blkdiag(eye(nx),eye(nu)),...
-    "Qr",eye(ny) );
+    "Qr",100*eye(ny) );
 
 gamma = 0.95;
-[Qcost_han, Pcost_han] = defineCustomTrackCost(sys, ccPoly, gamma);
+[Qcost_han, Pcost_han] = defineCustomTrackCost(sys, ccPoly, RCI_cost, gamma);
 
 % lump all cost function definitions together
 costFunMan = CostFunctionManager(sys, ccPoly, RCI_cost, Qcost_han, Pcost_han);
@@ -83,12 +83,15 @@ limon_mpc = RTMPC_Limon(sys, ccPoly, RCI_cost, N_ocp, lambda, solver_opts);
 N_mpc = 25+1; % simulation steps
 
 % (state space) system dynamics
-x_sys = zeros(nx, N_mpc+1); x_sys(:,1) = [-3.43;3]; % initial condition
+x_sys = zeros(nx, N_mpc+1);
+x_sys(:,1) = cctmpc.findFeasibleX0([-3.;3],blkdiag(0.001,100)); % initial condition
+x_sys(:,1) = [-3.12;2.95];% initial condition
+
 u_sys = zeros(nu, N_mpc);
 w_sys = zeros(nx, N_mpc);
 
 % define reference to be followed
-r_sys = zeros(ny, N_mpc); r_change = 12+1;
+r_sys = zeros(ny, N_mpc); r_change = 15+1;
 r_sys(:,1:r_change-1) = 5; r_sys(:,r_change:end) = -5;
 
 % (parameter space) optimal control dynamics
@@ -96,7 +99,7 @@ OCP_y = cell(1,N_mpc); OCP_u = cell(1,N_mpc);
 OCP_ys = cell(1,N_mpc); OCP_us = cell(1,N_mpc);
 
 RCI_ys = cell(1,N_mpc); RCI_us = cell(1,N_mpc);
-
+l_MPC = cell(1,N_mpc);
 Lyap_cost = zeros(1,N_mpc);
 
 
@@ -115,6 +118,7 @@ for t = 1:N_mpc
     % save computed data
     [OCP_y{t}, OCP_u{t}, OCP_ys{t}, OCP_us{t}] = cctmpc.ocpSol{:};
     [RCI_ys{t}, RCI_us{t}] = cctmpc.rciSol{:};
+    l_MPC{t} = cctmpc.lambdaSol;
     Lyap_cost(t) = cctmpc.Lyapunov_cost;
 end
 
@@ -131,18 +135,19 @@ dist_CCTMPC_MRCI = setDistance(feasRegionCCTMPC, MRCI);
 dist_ETMPC_MRCI = setDistance(feasRegionETMPC, MRCI);
 dist_RTMPC_MRCI = setDistance(feasRegionRTMPC, MRCI);
 
-disp("Hausdorff distance (MRCI,CCTMPC): " + dist_CCTMPC_MRCI)
-disp("Hausdorff distance (MRCI,ETMPC_tracking): " + dist_ETMPC_MRCI)
-disp("Hausdorff distance (MRCI,Limon_RTMPC): " + dist_RTMPC_MRCI)
+disp("Hausdorff distance (MRCI,CCTMPC): " + round(dist_CCTMPC_MRCI,4))
+disp("Hausdorff distance (MRCI,ETMPC_tracking): " + round(dist_ETMPC_MRCI,4))
+disp("Hausdorff distance (MRCI,Limon_RTMPC): " + round(dist_RTMPC_MRCI,4))
 
 %% Plot section
 % defining the plot scripts separately to improve code readibility
 LTI_2D_PlotPhasePlane;
 LTI_2D_PlotLyapunov;
+LTI_2D_PlotLambdas;
 
 %% ------------------------- support functions ----------------------------
 
-function [Qtrack_han, Ptrack_han] = defineCustomTrackCost(sys,ccPoly,gamma)
+function [Qtrack_han, Ptrack_han] = defineCustomTrackCost(sys,ccPoly,RCI_cost,gamma)
 % We provide an instance of a user-specified cost function, passed as an
 % handle. In this case, we seek a tradeoff between tracking performance and
 % CCPolytope volume. See "2D Example" in the Section IV from the paper.
@@ -152,8 +157,8 @@ nx = sys.nx; nu = sys.nu;
 m = ccPoly.m; m_bar = ccPoly.m_bar;
 
 % RCI cost matrices (in state space)
-Qv_x = 10*eye(nx);
-Qv_u = eye(nu);
+Qv_x = RCI_cost.Qv(1:nx,1:nx);
+Qv_u = RCI_cost.Qv(nx+1:end,nx+1:end);
 
 V_bar = mean(cat(3, ccPoly.Vi_s{:}), 3); % each Vi_s{i} is a 2D matrix, averaging along 3rd dim.
 U_bar = (1/m_bar)*repmat(eye(nu),1,m_bar); % nu x (nu*m_bar)

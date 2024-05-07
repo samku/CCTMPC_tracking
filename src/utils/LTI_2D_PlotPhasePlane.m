@@ -54,7 +54,7 @@ end
 %initial condition
 scatter(x_sys(1,1),x_sys(2,1),30, "filled","MarkerFaceColor",[0,0,0])
 scatter(x_sys(1,1),x_sys(2,1),20, "filled","MarkerFaceColor",[0 0.447 0.741])
-text(x_sys(1,1)-0.4,x_sys(2,1)-0.15,'$x_0$','Interpreter','latex','FontSize',12)
+text(x_sys(1,1)-0.45,x_sys(2,1)-0.075,'$x_0$','Interpreter','latex','FontSize',12)
 % second starting point
 scatter(x_sys(1,r_change)',x_sys(2,r_change)',25,'filled',"MarkerFaceColor",[0 0 0])
 scatter(x_sys(1,r_change)',x_sys(2,r_change)',20,'filled',"MarkerFaceColor",[0.635 0.078 0.184])
@@ -90,4 +90,4 @@ set(fig,'PaperPositionMode','Auto','PaperUnits',...
 
 fig.Renderer = 'painters'; % a way to force saving in vector graphics
 % % save the plot as PDF file
-saveas(fig, '../figures/LTI_2D.pdf','pdf')
+saveas(fig, '../figures/LTI_2D_PhasePlane.pdf','pdf')

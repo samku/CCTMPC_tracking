@@ -204,9 +204,8 @@ classdef ETMPC_tracking < handle
             % the terminal set from above (volume of the set diminishes at
             % each iteration)
             H_RPI = H_aug; h_RPI = h_aug;
-            t = 0;
-            while true
-                t = t+1; %disp(t)
+            
+            for t=1:100 % hard-coded exit condition, usually suff. tight approx.
                 H_RPI = [H_RPI; H_aug*A_aug^t];
                 % tighten constraints to get an invariant set
                 rhs_reduce = zeros(size(h_aug));
@@ -215,19 +214,20 @@ classdef ETMPC_tracking < handle
                 end
                 h_RPI = [h_RPI; h_aug - rhs_reduce];
                 
-                % Verify invariance H(Ax+d)<=h for all x:Hx<=h
-                new_h_RPI = h_RPI;
-                for i=1:size(h_RPI,1)
-                    xx = cplexlp(-(H_RPI(i,:)*A_aug)',H_RPI,h_RPI);
-                    new_h_RPI(i,1) = H_RPI(i,:)*(A_aug*xx+d_aug);
-                end
+                % reduce polytope complexity
+                termSetAug = Polyhedron(H_RPI,h_RPI).minHRep();
+                H_RPI = termSetAug.A;    h_RPI = termSetAug.b;
                 
-                if max(new_h_RPI-h_RPI) <= 1e-6 % suff. small improvement
-                    break
+                % Verify invariance H(Ax+d)<=h for all x:Hx<=h
+                new_h_RPI = zeros(size(h_RPI));
+                for i=1:length(new_h_RPI)
+                    xx = cplexlp(-(H_RPI(i,:)*A_aug)',H_RPI,h_RPI);
+                    new_h_RPI(i) = H_RPI(i,:)*(A_aug*xx+d_aug);
                 end
+                if max(new_h_RPI-h_RPI)<=1e-6
+                   break                    
+                end                
             end
-            % now (H_RPI,h_RPI) can be used for the terminal set.
-            termSetAug = Polyhedron(H_RPI,h_RPI).minHRep();
         end
         
         

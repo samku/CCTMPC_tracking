@@ -5,34 +5,23 @@
 % responsible for a different use (that it's up to you.)
 db_check = dbstack;
 if length(db_check) < 3 && ...
-        ~any(strcmp(db_check(end).name,{'LateralDynamics','evaluateCode'}))
+        ~any(strcmp(db_check(end).name,{'LTI_2D','evaluateCode'}))
     error("Script was called directly. Execute the example one first.")
 end
 
 % % create figure
 fig = figure("Renderer","painters","Units","centimeters");
-fig.Position(3:4) = 3*[2,1.75]; % [width,height]
+fig.Position(3:4) = 3*[4,1.75]; % [width,height]
 
+% plot data until reference change
+l_MPC_mat = cell2mat(l_MPC);
+plot(0:r_change-2, l_MPC_mat(:,1:r_change-1))
+hold on;    grid on
 
-% impose a solver tolerance
-solv_tol = 1e-5;
-% minor cosmetic edits
-Lyap_cost = max(Lyap_cost, solv_tol/10);
-Lyap_cost(Lyap_cost < solv_tol*2) = solv_tol/10;
-
-% plot Lyapunov cost
-semilogy(0:N_mpc-1, Lyap_cost,'.-','MarkerSize',7, 'Color',[0 0.447 0.741],'LineWidth',0.5);
-hold on
-
-% mask points under solver tolerance
-rectangle('Position',[0,1e-15,N_mpc,solv_tol-1e-15],'FaceColor',[0.7,0.7,0.7],'LineStyle','none')
-grid on
-xl = xline(r_change-1,'--');
-yl = yline(solv_tol);
-
-% % add labels and axes limit
-xlabel("$t$",'Interpreter','latex');    set(gca, 'TickLabelInterpreter', 'latex')
-xlim([0,N_mpc-1]);  ylim([solv_tol/1.5, max(Lyap_cost)*1.5])
+% add labels and axes limit
+xlabel("$t$",'Interpreter','latex');    ylabel("$\lambda$",'Interpreter','latex');
+set(gca, 'TickLabelInterpreter', 'latex')
+xlim([0,r_change-2])
 
 % % minimize white borders around plot
 set(gca,'LooseInset', max(get(gca,'TightInset'), 0.02)) % remove border from axis
@@ -41,4 +30,4 @@ set(fig,'PaperPositionMode','Auto','PaperUnits',...
 
 fig.Renderer = 'painters'; % a way to force saving in vector graphics
 % % save the plot as PDF file
-saveas(fig, '../figures/LateralDynamics_Lyapunov.pdf','pdf')
+saveas(fig, '../figures/LTI_2D_Lambdas.pdf','pdf')

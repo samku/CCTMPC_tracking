@@ -41,4 +41,4 @@ set(fig,'PaperPositionMode','Auto','PaperUnits',...
 
 fig.Renderer = 'painters'; % a way to force saving in vector graphics
 % % save the plot as PDF file
-saveas(fig, '../figures/Lyapunov_2D_LTI.pdf','pdf')
+saveas(fig, '../figures/LTI_2D_Lyapunov.pdf','pdf')

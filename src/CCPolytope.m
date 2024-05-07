@@ -46,6 +46,8 @@ classdef CCPolytope
             
             obj.E = sparse(obj.computeEMatrix()); % usually very sparse.
             
+%             % reduce the number of redundant rows?
+            obj.E = Polyhedron(obj.E,zeros(size(obj.E,1),1)).minHRep().A;
             obj.d = obj.sys.W_dist.support(F');
         end
     end

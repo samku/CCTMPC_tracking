@@ -8,6 +8,7 @@ classdef CCTMPC < handle
         r_prev % reference at previous timestep. Needed to trigger RCI computation
         ocpSol % cell array, solution from the main QP problem.
         rciSol % cell array, solution from RCI
+        lambdaSol % solution of convex combination of the vertex control law
     end
     
     properties (Access = private)
@@ -61,10 +62,11 @@ classdef CCTMPC < handle
                 otherwise
                     error("Unsupported OCP class: %s", class(obj.optController))
             end
-            % compute the optimal input (in state space)
-            uMPC = obj.mpcLaw(x_curr, obj.ocpSol{1}(:,1), obj.ocpSol{2}(:,:,1));
+            % compute the optimal input (in state space) and lambda multipliers
+            mpcSol = obj.mpcLaw(x_curr, obj.ocpSol{1}(:,1), obj.ocpSol{2}(:,:,1));
+            [uMPC, obj.lambdaSol] = mpcSol{:};
             if isnan(uMPC)
-                if sum(abs(obj.optController.findFeasibleX0(x_curr,eye(obj.optController.sys.nx)) - x_curr)) > 1e-5
+                if sum(abs(obj.findFeasibleX0(x_curr,eye(obj.optController.sys.nx)) - x_curr)) > 1e-5
                     error("The current state does not lie inside the feasible"+...
                         " region of the control scheme. Consider changing initial condition.")
                 end
@@ -75,6 +77,19 @@ classdef CCTMPC < handle
 
         function feasRegion = computeFeasRegion(obj, n_facets, varargin)
             feasRegion = obj.optController.computeFeasRegion(n_facets, varargin{:});
+        end
+        
+        
+        function feasX0 = findFeasibleX0(obj,x_curr,varargin)
+            % interface method to the underlying OCP
+            switch length(varargin)
+                case 0
+                    feasX0 = obj.optController.findFeasibleX0(x_curr,eye(obj.optController.sys.nx));
+                case 1
+                    feasX0 = obj.optController.findFeasibleX0(x_curr,varargin{:});
+                otherwise
+                    error("%d arguments provided (max 1 expected).",length(varargin));
+            end
         end
     end
     
@@ -160,22 +175,23 @@ classdef CCTMPC < handle
             u0Opt = sdpvar(nu, m_bar,'full');
             x0 = sdpvar(nx, 1,'full');
             
-            thetas = sdpvar(m_bar, 1,'full');
+            lambda = sdpvar(m_bar, 1,'full');
             
             constr = [];
-            constr = [constr; sum(thetas)==1; thetas >= zeros(size(thetas))];
+            constr = [constr; sum(lambda)==1; lambda >= 0];
             x_eq_sum = 0;
             for j=1:m_bar
-                x_eq_sum = x_eq_sum + thetas(j)*Vi_s{j}*y0Opt;
+                x_eq_sum = x_eq_sum + lambda(j)*Vi_s{j}*y0Opt;
             end
             constr = [constr; x0 == x_eq_sum];
             
-            cost = weightSq2Norm(thetas, eye(size(thetas,1))); % squared 2-norm
+            % cost = weightSq2Norm(lambda, eye(size(lambda,1))); % squared 2-norm
+            cost = nnz(lambda);
             
             mpcLaw = optimizer(constr, cost, ...
                 sdpsettings(obj.optController.sdp_opts{:}), ...
                 {x0, y0Opt, u0Opt}, ... % input parameters
-                {u0Opt*thetas} ... % output parameters
+                {u0Opt*lambda, lambda} ... % output parameters
                 ); % (nu x m_bar) * (m_bar x 1) -> (nu x 1)
         end
         

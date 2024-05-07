@@ -28,12 +28,12 @@ If you find this package useful, please consider giving this repository a **star
 If our work has contributed to your research, we kindly ask you to acknowledge it by citing our paper.
 ### <a id="1">[1]</a> CCTMPC for Tracking
 ```latex
-@misc{YourName2024,
-  author = {YourName},
-  title = {Configuration-Constrained Tube Model Predictive Control (CCTMPC) for Tracking},
-  year = {2024},
-  publisher = {GitHub},
-  journal = {GitHub Repository},
-  howpublished = {\url{https://github.com/YourGitHubUsername/YourRepositoryName}}
+@misc{badalamenti2024configurationconstrained,
+      title={Configuration-Constrained Tube MPC for Tracking}, 
+      author={Filippo Badalamenti and Sampath Kumar Mulagaleti and Alberto Bemporad and Boris Houska and Mario Eduardo Villanueva},
+      year={2024},
+      eprint={2405.03629},
+      archivePrefix={arXiv},
+      primaryClass={eess.SY}
 }
 ```

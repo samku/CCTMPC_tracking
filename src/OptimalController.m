@@ -54,6 +54,7 @@ classdef OptimalController < handle
             obj.feasRegion = nan; % computation delayed (slow), used only for plots.
         end
         
+        
         function feas_x0 = findFeasibleX0(obj, x0_des, costFun)
             
             weightSq2Norm = @(vector, mat) vector'*mat*vector;
@@ -82,17 +83,21 @@ classdef OptimalController < handle
             
             % Stage + terminal constraints
             for k=1:obj.N-1
-                constr = [constr; obj.constrSetS(y(:,k), u(:,:,k), y(:,k+1) )];
+                constr = [constr; 
+                    obj.constrSetS(y(:,k), u(:,:,k), y(:,k+1),obj.sys.A_convh,obj.sys.B_convh )];
             end
-            constr = [constr; obj.constrSetS(y(:,obj.N), u(:,:,obj.N), obj.gamma*y(:,obj.N)+(1-obj.gamma)*ys)];
+            constr = [constr; 
+                obj.constrSetS(y(:,obj.N), u(:,:,obj.N), obj.gamma*y(:,obj.N)+(1-obj.gamma)*ys,...
+                obj.sys.A_convh,obj.sys.B_convh)];
             
             % RCI constraint
-            constr = [constr; obj.constrSetS(ys, us, ys)];
+            constr = [constr; obj.constrSetS(ys, us, ys,obj.sys.A_convh,obj.sys.B_convh)];
             
             % solve the OCP
             optimize(constr,cost,sdpsettings(obj.sdp_opts{:}));
             feas_x0 = value(x0);
         end
+        
         
         function feasRegion = computeFeasRegion(obj, n_facets, varargin)
             % compute a new feasible region for a template of #facets
@@ -116,8 +121,8 @@ classdef OptimalController < handle
         end
     end
     
-    methods (Access = private)
-        
+    
+    methods (Access = private)        
         function ocpOptim = initOCPOptimizer(obj, var_convh)
             y=sdpvar(obj.ccPoly.m, obj.N,'full');
             u=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, obj.N,'full');
@@ -295,7 +300,7 @@ classdef OptimalController < handle
         end
         
         
-        function constr = constrSetS(obj,y,u,yp, A_convh,B_convh)
+        function constr = constrSetS(obj,y,u,yp,A_convh,B_convh)
             % define the Configuration Constrained RFIT set.
             constr = [];
             for j=1:obj.ccPoly.m_bar
@@ -306,7 +311,7 @@ classdef OptimalController < handle
                 constr = [constr;   obj.sys.X.A*obj.ccPoly.Vi_s{j}*y <= obj.sys.X.b;    obj.sys.U.A*u(:,j) <= obj.sys.U.b];
                 
             end
-            constr = [constr; obj.ccPoly.E*y <= zeros(size(obj.ccPoly.E,1),1)];
+            constr = [constr; obj.ccPoly.E*y <= 0];
         end
         
     end
