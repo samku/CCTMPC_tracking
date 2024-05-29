@@ -1,6 +1,6 @@
 classdef CostFunctionManager
-    % collector class to manage costs to be passed to the OptimalController
-    % class.
+    % Collector class to handle objective function definition, that must be
+    % later passed to the OptimalController class.
     
     properties (SetAccess = private)
         cost_RCI % must be a convex function (not necessarily strictly)
@@ -10,9 +10,9 @@ classdef CostFunctionManager
     
     methods (Access = public)
         function obj = CostFunctionManager(sys, ccPoly, RCI_cost, Stage_cost, Term_cost)
-            % if matrices are passed, then construct the cost functions;
+            % if matrices are passed, construct a quadratic cost function;
             % otherwise, set the function handle accordingly.
-            % NOTICE: in the second case, function signature must be:
+            % NOTE: in the second case, function signature must be:
             % RCI_cost:     @(ys,us,r,th_s)
             % Stage_cost:   @(y_k,u_k,ys,us)
             % Term_cost:    @(y_N,u_N,ys,us)
@@ -53,7 +53,7 @@ classdef CostFunctionManager
             % refer to Section II-D from the paper.
             
             V_bar = mean(cat(3, ccpoly.Vi_s{:}), 3); % each Vi_s{i} is a 2D matrix, averaging along 3rd dim.
-            U_bar = (1/ccpoly.m_bar)*repmat(eye(sys.nu),1,ccpoly.m_bar); % nu x (nu*m_bar)
+            U_bar = (1/ccpoly.v)*repmat(eye(sys.nu),1,ccpoly.v); % nu x (nu*v)
             
             A_bar = mean(cat(3, sys.A_convh{:}), 3);
             B_bar = mean(cat(3, sys.B_convh{:}), 3);
@@ -63,7 +63,7 @@ classdef CostFunctionManager
             weightSq2Norm = @(vector, mat) vector'*mat*vector;
             
             cost_RCI = @(ys, us, r, th_s)...
-                arrayfun(@(i)sum( weightSq2Norm(  [(V_bar-ccpoly.Vi_s{i})*ys ; U_bar*us(:)-us(:,i)], RCI_cost.Qv)  ), 1:ccpoly.m_bar ) + ...
+                arrayfun(@(i)sum( weightSq2Norm(  [(V_bar-ccpoly.Vi_s{i})*ys ; U_bar*us(:)-us(:,i)], RCI_cost.Qv)  ), 1:ccpoly.v ) + ...
                 weightSq2Norm( blkdiag(V_bar,U_bar)*[ys;us(:)] - M*th_s, RCI_cost.Qc) + ...
                 weightSq2Norm( r - [sys.C, sys.D]*M*th_s, RCI_cost.Qr);
         end

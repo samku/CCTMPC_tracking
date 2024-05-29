@@ -1,12 +1,17 @@
 classdef CCPolytope
+    % Definition of polytopes for a given template matrix. The goal is to 
+    % get polytopes which are entirely simple for their use in the control 
+    % scheme. A method from [https://arxiv.org/abs/2309.02384,Section IV-D]
+    % is also included, to compute an appropriate transformation matrix 
+    % such that the resulting polytope is a CCPolytope
     
     properties (SetAccess = private)
         sys % dynamical system associated to the polytope
-        ccpolytope % Configuration Constrained polytope
-        m % number of facets
-        m_bar % number of vertices
-        Vi_s % cell array of vertices
-        E % configuration-constrained polytope of parameter
+        ccpolytope % Configuration-Constrained polytope
+        m % #facets
+        v % #vertices
+        Vi_s % cell array of isolated vertices of the polytope
+        E % conic constraint in parameter space (Ey<=0)
         
         d % support (polytopic enclosure) of the uncertainty set
     end
@@ -24,8 +29,8 @@ classdef CCPolytope
     methods (Access = public)
         function obj = CCPolytope(sys, varargin)
             % Two admissible constructor signatures:
-            % {sys, F} : use a provided CC-template directly (useful for dim=2)
-            % {sys, C_tilde, D} : compute a valid CC-template (suggested for dim >=3)
+            % {sys, F} : use a provided CC-template directly (useful for state_dim=2)
+            % {sys, C_tilde, D} : compute a valid CC-template (suggested for state_dim >=3)
             obj.sys = sys;
             
             switch length(varargin)
@@ -38,15 +43,15 @@ classdef CCPolytope
             end
             obj.m = size(F,1);
             
-            % using ones() as initial parameter, the CCPolytope is entirely simple.
+            % using ones() as initial parameter, the CCPolytope is entirely simple
             obj.ccpolytope = Polyhedron(F,ones(obj.m,1));
             
             obj.Vi_s = obj.getVi_s();
-            obj.m_bar = length(obj.Vi_s);
+            obj.v = length(obj.Vi_s);
             
-            obj.E = sparse(obj.computeEMatrix()); % usually very sparse.
+            obj.E = sparse(obj.computeEMatrix()); % usually very sparse
             
-%             % reduce the number of redundant rows?
+            % reduce the number of redundant rows
             obj.E = Polyhedron(obj.E,zeros(size(obj.E,1),1)).minHRep().A;
             obj.d = obj.sys.W_dist.support(F');
         end
@@ -56,8 +61,8 @@ classdef CCPolytope
         
         function E = computeEMatrix(obj)
             % conic constraint defining the vertex configuration domain explicitly
-            E = zeros(obj.m_bar*obj.m, obj.m);
-            for i=1:obj.m_bar
+            E = zeros(obj.v*obj.m, obj.m);
+            for i=1:obj.v
                 E((i-1)*obj.m+1:i*obj.m,:) = obj.F*obj.Vi_s{i}-eye(obj.m);
             end
             E(abs(E)<1e-10) = 0; % round numerical errors ~=0
@@ -84,11 +89,11 @@ classdef CCPolytope
         
         function F = getCCTemplateMatrixCASADI(obj,C_tilde,D)
             % from [https://arxiv.org/abs/2309.02384,Section IV-D]:
-            % - firstly, we define a C_tilde matrix (m,nx), thus fixing
-            % the polytope complexity)
-            % - then, we solve an opt. problem to find the proper
-            % transformation matrix W_inv such that F = C_tilde*W_inv is a
-            % template for a CCPolytope.
+            % - firstly, we define a C_tilde matrix (m,nx), thus fixing the
+            %   polytope complexity)
+            % - then, we solve an NLP to find the proper transformation 
+            %   matrix W_inv such that F = C_tilde*W_inv is a template for 
+            %   a CCPolytope.
             nx = obj.sys.nx; nu = obj.sys.nu;
             
             Z_set = Polyhedron(C_tilde,ones(size(C_tilde,1),1) );
@@ -121,7 +126,6 @@ classdef CCPolytope
             end
             
             % vertex-control problem
-            % TODO: use multipliers instead of vertices for disturbance
             wl_s =  num2cell(obj.sys.W_dist.V',1);
             
             for j=1:length(zj_s) % vertices
@@ -129,7 +133,7 @@ classdef CCPolytope
                     for l=1:length(wl_s) % disturbance vertices
                         opti.subject_to( ...
                             C_tilde*M*(obj.sys.A_convh{i}*W*zj_s{j}+obj.sys.B_convh{i}*uj_s(:,j)+wl_s{l})<=ones(size(C_tilde,1),1) ...
-                            );
+                        );
                     end
                 end
                 opti.subject_to( obj.sys.X.A*W*zj_s{j} <= obj.sys.X.b );
@@ -146,7 +150,7 @@ classdef CCPolytope
             opti_opts = struct('ipopt', ipopt, 'print_time', 1);
             opti.solver('ipopt',opti_opts)
             
-            % non-zero initial condition for matrices (improving OCP performance)
+            % non-zero initial condition for matrices (improving NLP convergence)
             opti.set_initial(W, eye(nx));
             opti.set_initial(M,	eye(nx));
             

@@ -12,7 +12,7 @@ import casadi.*
 % -----------------------
 
 %% System definition
-% Define the LPV discrete system (based on empirical parameters)
+% Define the discrete LPV system
 Ts = 0.025;
 [A_is, B_is, Bw] = defDTLateralDynamics(Ts);
 
@@ -39,13 +39,13 @@ B_curr_han = @(B_convh,vx) vx*B_is{1} + (1/vx)*B_is{2} + B_is{3};
 
 sys = DynSystem(A_convh, B_convh, C, D, X, U, W_dist,A_curr_han,B_curr_han);
 
-% get Configuration-Constrained polytope
+% compute a Configuration-Constrained polytope
 C_tilde = [eye(nx); -eye(nx)];
-ccPoly = CCPolytope(sys, C_tilde, C_tilde); % (sys,C_tilde,Dist)
+ccPoly = CCPolytope(sys, C_tilde, C_tilde); % (sys,C_tilde,SetDistance)
 
-% Cost Function definition: we can pass either structs of matrices, or
-% function handles defined externally. Just be sure that the function is
-% -strictly- convex, and that the function signatures are:
+% Cost Function definition: we can either pass structs of matrices, or
+% function handles defined externally. We only require that the cost
+% functions are -strictly- convex, and that the function signatures are:
 % RCI_cost : @(ys, us, r, th_s)
 % Stage/Term_cost : @(y_k/N,u_k/N,ys,us)
 RCI_cost = struct(  "Qv",blkdiag(0.001*eye(nx), 0.01*eye(nu)),...
@@ -53,16 +53,16 @@ RCI_cost = struct(  "Qv",blkdiag(0.001*eye(nx), 0.01*eye(nu)),...
     "Qr",10*eye(ny) );
 
 gamma = 0.95;
-Qmat = blkdiag(0.001*eye(ccPoly.m),  0.01*eye(nu*ccPoly.m_bar));
+Qmat = blkdiag(0.001*eye(ccPoly.m),  0.01*eye(nu*ccPoly.v));
 Pmat = ((1-gamma^2)^-1)*Qmat;
 
-% lump all cost function definitions together
+% collect all cost function definitions in a single class
 costFunMan = CostFunctionManager(sys, ccPoly, RCI_cost, Qmat, Pmat);
 
 % build the MPC scheme
 solver_opts = {'solver','gurobi','verbose',0};
 N_ocp = 3;
-variableConvh = true; % used as flag for OptimalController class (faster code)
+variableConvh = true; % flag for OptimalController class (fixed matrices produces faster code)
 useBasicOCP = false;
 cctmpc = CCTMPC(sys, ccPoly, costFunMan, N_ocp, gamma, solver_opts, variableConvh,useBasicOCP);
 
@@ -87,13 +87,12 @@ RCI_ys = cell(1,N_mpc); RCI_us = cell(1,N_mpc);
 
 Lyap_cost = zeros(1,N_mpc);
 
-% define longitudinal dynamics profile
+% define longitudinal dynamic profile
 longDyn = defLongDyn(Ts, vx_interval, N_mpc, r_change);
 
-
+% main loop
 for t = 1:N_mpc
-    disp("MPC iteration: " + t+"/"+N_mpc)
-    
+    disp("MPC iteration: " + t+"/"+N_mpc)    
     % compute the current A/B_convh
     [A_convh_curr, B_convh_curr] = updateDynModel(A_is, B_is, P_hat, longDyn.vx(t));
     
@@ -103,9 +102,8 @@ for t = 1:N_mpc
     % compute random disturbance
     w_sys(:,t) = W_dist.randomPoint();
     
-    % evolve the system
+    % propagate system dynamics
     x_sys(:,t+1) = sys.A_curr(longDyn.vx(t))*x_sys(:,t) + sys.B_curr(longDyn.vx(t))*u_sys(:,t) + w_sys(:,t);
-    
     
     % save computed data
     [OCP_y{t}, OCP_u{t}, OCP_ys{t}, OCP_us{t}] = cctmpc.ocpSol{:};
@@ -127,14 +125,14 @@ projVerts = cell2struct(projVerts,...
     {'ey_y','ey_ys','ey_rci','epsi_y','epsi_ys','epsi_rci'},2);
 
 %% Plot section (Driving scenario)
-% defining the plot scripts separately to improve code readibility
+% generate plots in separate scripts to improve code readibility
 LateralDynamics_PlotStateSpace;
 LateralDynamics_PlotLyapunov;
 
-%% ------------------------- support functions ----------------------------
+%% ------------------------- Support functions ----------------------------
 
 function [A_is, B_is, Bw] = defDTLateralDynamics(Ts)
-% Continuous time system definition with collected parameters
+% Continuous time system definition with empirical parameters
 param1=-171.2893;
 param2=85.2523;
 param3=42.1875;
@@ -166,7 +164,7 @@ end
 
 
 function [A_convh, B_convh, P_hat] = defPolytopicLPVEnclosure(A_is, B_is, vx_interval)
-
+% compute polytopic over-approximation of the parameter set
 p1_val = vx_interval;
 p2_val = 1./p1_val; % 1/vx
 
@@ -175,7 +173,8 @@ p_vals = [p1_val; p2_val];
 slope = (p_vals(2,1)-p_vals(2,2)) / (p_vals(1,1)-p_vals(1,2));
 
 % encapsulate the function p2 = f(p1)
-sdpvar p1 p2 h
+h = sdpvar(1); p1 = sdpvar(1); p2 = sdpvar(1);
+
 cost = h;
 constr = [p1*p2 == 1;
     p2 == slope*p1+h;
@@ -187,7 +186,7 @@ h = value(h);
 % get the 4 vertices
 v_lh = p_vals(:,1); v_hl = p_vals(:,2);
 v_ll = [p_vals(1,1); slope*p_vals(1,1)+h];
-v_hh = [inv(slope)*(p_vals(2,2)-h); p_vals(2,2)];
+v_hh = [(slope)\(p_vals(2,2)-h); p_vals(2,2)];
 
 P_hat = Polyhedron([v_lh'; v_hl'; v_ll'; v_hh']);
 P_hat_V = num2cell(P_hat.V',1); np = length(P_hat_V);
@@ -204,6 +203,7 @@ end
 end
 
 function vert_projs = projPolytope(F,y_cells,projs)
+% project the CCPolytope for relevant state components
 nx = size(F,2);
 vert_projs = cell(length(y_cells),length(projs));
 
@@ -219,7 +219,7 @@ for p = 1:length(projs)
             vert_projs{y,p} = repmat(poly_proj_vert,1,2);
         elseif isempty(poly_proj_vert)
             % MPT3 unable to find an interior due to numerical error. Warns
-            % the user and use a backup method to find a point.
+            % the user and use a backup method to find a feasible point.
             warning("dim:" + length(poly_proj_vert));
             poly_point = (poly_t.A(1:nx,:) \  poly_t.b(1:nx,:));
             vert_projs{y,p} = repmat(poly_point(projs(p)),1,2);
@@ -258,7 +258,7 @@ function [A_convh_curr, B_convh_curr] = updateDynModel(A_is, B_is, P_hat, vx_cur
 % we are monotonically reducing the vx range. For this reason, P_hat is
 % changing as if we add a new tighter constraint, replacing the previous one
 
-% we don't collapse the set to a single point, we leave 5km/h range
+% NOTE: here we don't collapse the set to a single point, we leave 5km/h range
 P_hat_curr = Polyhedron([P_hat.A;-1,0],[P_hat.b;-min(vx_curr,max(P_hat.V(:,1))-5/3.6 )]);
 P_hat_V = num2cell(P_hat_curr.V',1); np = length(P_hat_V);
 

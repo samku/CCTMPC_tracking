@@ -2,11 +2,11 @@
 This repository provides the essential MATLAB code to implement the CCTMPC scheme as described in our paper [[1]](#1). The scripts for generating the two numerical examples presented in the paper are located in the `examples` folder.
 ## Examples
 
-**Example 1 (Linear Time-Invariant System in 2D):**
+**Linear Time-Invariant System in 2D**
 
 ![ex1](./figures/for_readme/example1.png)
 
-**Example 2 (Vehicle Lateral Dynamics):**
+**Vehicle Lateral Dynamics**
 
 ![ex2](./figures/for_readme/example2.png)
 
@@ -19,7 +19,7 @@ The following software packages are required to run the code. To enhance the acc
 - [CasADi for IPOPT](https://web.casadi.org/) 
 
 ## Usage Instructions
-Before running any of the provided examples, please ensure that the library imports align with your system’s PATH. Once this is done, the code is self-contained and executing it will generate the above plots (as well as the Lyapunov cost over time) in the `figures` folder.
+Before running any of the provided examples, please ensure that the library imports align with your system’s PATH. Once this step is done, the code is self-contained and executing it will generate the above plots (as well as the Lyapunov cost over time) in the `figures` folder.
 
 ## Feedback and contributions
 If you find this package useful, please consider giving this repository a **star** as a token of appreciation. We welcome contributions to the code. If you encounter a bug, or if you have suggestions for new features, please post them on the [issue page](https://github.com/samku/CCTMPC_tracking/issues). 

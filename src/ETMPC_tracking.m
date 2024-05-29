@@ -1,22 +1,21 @@
 classdef ETMPC_tracking < handle
-    % ETMPC_TRACKING Summary of this class goes here
-    %   Detailed explanation goes here
-    % ETMPC implementation has been modified according to "RTMPC for
-    % tracking" by Limon. In this way, we increase feasible region by
-    % targeting an artificial output.
+    % ETMPC (developed by Rakovic) extended to tracking scheme according to
+    % "RTMPC for tracking" by Limon. By targeting an artificial state, we 
+    % increase the feasible region providing a fairer comparison with our
+    % method.
     
     properties (SetAccess = private)
         optContrSol % struct, solution from OCP
         
-        feasRegion % Polytope, define the (approximated) feasible region for the MPC scheme
+        feasRegion % Polytope, (approximated) feasible region for the OCP
         
-        sys % system dynamics and constraints
+        sys % dynamical system 
         ccPoly % vertex and parameters from the CCPolytope are used for comparison
         costMats % struct that aggregates all the relevant matrices for the system
         N % prediction horizon for the OCP
-        lambda % user defined discount factor for the terminal set
-        sdp_opts % options related to SDPVar (solver, verbosity...)
-        
+        lambda % computing a tight approx. of the mRPI set as terminal set
+        sdp_opts % YALMIP optimizer options (solver, verbosity...)
+          
         y_mRPI
         L_RPI, L_HX, L_HU
         termSetAug
@@ -27,8 +26,9 @@ classdef ETMPC_tracking < handle
     properties (Access = private)
         optController % YALMIP optimizer, Optimal Controller
         K_projector % YALMIP optimizer, for closed loop input constraint satisfaction
+        
         directionalFeasRegion % YALMIP optimizer, compute the farthest feasible
-        % initial condition with respect to a specific facet.
+        % initial state with respect to a specific facet.
     end
     
     properties(Dependent)
@@ -76,7 +76,7 @@ classdef ETMPC_tracking < handle
             obj.optContrSol = cell(5,1); % {x,u,theta,a,cost} fields
             
             obj.directionalFeasRegion = obj.initDirFeasRegion();
-            obj.feasRegion = nan; % computation delayed (slow), used only for plots.
+            obj.feasRegion = nan; % computation (slow) delayed, as only used in plots
             
         end
         
@@ -96,10 +96,11 @@ classdef ETMPC_tracking < handle
         end
         
         function feas_x0 = findFeasibleX0(obj, x0_des, costFun)
+            % find the closest feasible initial state to the desired one
             weightSq2Norm = @(vector, mat) vector'*mat*vector;
             Mx = obj.M(1:obj.sys.nx,:); Mu = obj.M(obj.sys.nx+1:end,:);
             
-            % optContr yalmip definitions
+            % optContr YALMIP definitions
             theta = sdpvar(obj.sys.nu, 1,'full');
             x0 = sdpvar(obj.sys.nx, 1, 'full');
             x = sdpvar(obj.sys.nx, obj.N,'full');
@@ -141,8 +142,7 @@ classdef ETMPC_tracking < handle
         
         
         function feasRegion = computeFeasRegion(obj, n_facets)
-            % compute a new feasible region for a template of #facets
-            % complexity.
+            % compute a new feasible region given a template of #facets complexity.
             H_stab = getTemplateMatrix(obj.sys.nx, n_facets);
             h_stab = zeros(size(H_stab,1),1);
             
@@ -179,7 +179,6 @@ classdef ETMPC_tracking < handle
             % compute the steady-state subspace
             obj.M = null([A-eye(nx) B]);
             Mx = obj.M(1:nx,:); Mu = obj.M(nx+1:end,:);
-            
             
             % extend state vector and constraint matrices to [z;theta;a]
             A_aug = [A+B*obj.K, B*Mu-B*obj.K*Mx, zeros(nx, m);
@@ -279,7 +278,7 @@ classdef ETMPC_tracking < handle
         
         
         function K_projector = initKProjector(obj)
-            % ensure that the closed loop control law {u_cl = v0+K*(x-z0)}
+            % ensure that the closed loop control law  u_cl = v0+K*(x-z0)
             % fulfills input constraints.
             K_des = sdpvar(obj.sys.nu, obj.sys.nx,'full');
             K_proj= sdpvar(obj.sys.nu, obj.sys.nx,'full');
@@ -385,26 +384,24 @@ classdef ETMPC_tracking < handle
         
         
         function P_RPI = getRPITerminalCost(obj)
-            % we don't use 'full' option, so that P_RPI is symmetric (hence
-            % we get positive semidefiniteness more easily)
+            % P_RPI is computed without the 'full' option, so that the 
+            % resulting matrix is symmetric.
             P_RPI = sdpvar(obj.ccPoly.m, obj.ccPoly.m);
             constr = [-obj.Q_RPI + P_RPI - obj.L_RPI'*P_RPI*obj.L_RPI >= 0;
                 P_RPI >= 0];
-            %             optimize(constr,trace(P_RPI),sdpsettings(obj.sdp_opts{:}));
             optimize(constr,trace(P_RPI),sdpsettings('solver','mosek','verbose',0));
             P_RPI=value(P_RPI);
         end
         
         function costMats = computeCostMats(obj, costMatricesSS)
             % from the constructor, we pass the cost matrices defined in
-            % the state space (called here Q*_x/u,*=c,v). Due to comparison
-            % reasons, we must redefine the system in the parameter space,
-            % so transformations must be carried out. For this reason, we
-            % save all the matrices in a single struct.
+            % the state space (called here Q*_x/u,*=c,v). For comparison
+            % purposes, we redefine the system in the parameter space. All 
+            % the matrices are saved in a single struct.
             
             % frequently used constant throughout function
             nx = obj.sys.nx; nu = obj.sys.nu;
-            m = obj.ccPoly.m; m_bar = obj.ccPoly.m_bar;
+            m = obj.ccPoly.m; v = obj.ccPoly.v;
             
             % define the cost struct
             costMats = struct;
@@ -415,18 +412,18 @@ classdef ETMPC_tracking < handle
             
             % CCPolytope volume cost (in parameter space)
             V_bar = mean(cat(3, obj.ccPoly.Vi_s{:}), 3); % each Vi_s{i} is a 2D matrix, averaging along 3rd dim.
-            U_bar = (1/m_bar)*repmat(eye(nu),1,m_bar); % nu x (nu*m_bar)
+            U_bar = (1/v)*repmat(eye(nu),1,v); % nu x (nu*v)
             
             Qv_yp = zeros(m,m);
-            for i = 1:m_bar
+            for i = 1:v
                 Qv_yp = Qv_yp + (obj.ccPoly.Vi_s{i}-V_bar)'*costMats.Qv_x*(obj.ccPoly.Vi_s{i}-V_bar);
             end
             costMats.Qv_yp = Qv_yp;
             
-            Qv_up = zeros(nu*m_bar, nu*m_bar);
+            Qv_up = zeros(nu*v, nu*v);
             Iu_mats = {};
-            for i = 1:m_bar
-                Iu_mats{i} = sparse(nu,nu*m_bar);
+            for i = 1:v
+                Iu_mats{i} = sparse(nu,nu*v);
                 Iu_mats{i}(:,(i-1)*nu+1:i*nu) = eye(nu);
                 Qv_up = Qv_up + (Iu_mats{i}-U_bar)'*costMats.Qv_u*(Iu_mats{i}-U_bar);
             end
@@ -443,7 +440,8 @@ classdef ETMPC_tracking < handle
             % reference tracking (in state space)
             costMats.Qr = costMatricesSS.Qr;
         end
+        
+        
     end
     
 end
-

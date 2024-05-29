@@ -1,24 +1,25 @@
 classdef OptimalController < handle
-    % The optimal controller defind with YALMIP. preferred solver is gurobi
-    % we also define a flag variable to disable matrix update if not
-    % required and speeding up computation (2-3x improvement)
+    % OCP as defined in Equation (19) from the paper. Problem written using
+    % YALMIP. Preferred solver is Gurobi. We also define a flag variable
+    % to disable matrix update if not required and speeding up computation
+    % (2-3x improvement).
     
     properties (SetAccess = private)
         sys % dynamical system
         N % prediction horizon length
-        ccPoly % Configuration constrained poly
-        sdp_opts % options related to SDPVar (solver, verbosity...)
+        ccPoly % Configuration-Constrained Polytope
+        sdp_opts % YALMIP optimizer options (solver, verbosity...)
         costFunMan % support class for cost function definition
-        OCP_optimizer  % main QP problem.
-        RCI_optimizer % QP for solving RCI set only. Used mainly for plotting reasons
+        OCP_optimizer  % main QP problem
+        RCI_optimizer % QP for solving RCI set only. Used for plotting reasons
         gamma % user specified discount factor
         
-        feasRegion % Polytope, define the (approximated) feasible region for the OCP scheme
+        feasRegion % Polytope, (approximated) feasible region for the OCP
     end
     
     properties (Access = private)
         directionalFeasRegion % YALMIP optimizer, compute the farthest feasible
-        % initial condition with respect to a specific facet.
+        % initial state with respect to a specific facet.
     end
     
     methods % GETTER methods
@@ -35,12 +36,6 @@ classdef OptimalController < handle
     
     methods (Access = public)
         function obj = OptimalController(sys, ccPoly, costFunMan, N, gamma, sdp_opts, var_convh)
-            %OPTIMALCONTROLLER Construct an instance of this class
-            %   Detailed explanation goes here
-            
-            % TODO: the var_convh is not sufficiently robust yet. Edge
-            % cases must still addressed.
-            
             obj.sys = sys;
             obj.N = N;
             obj.ccPoly = ccPoly;
@@ -51,20 +46,20 @@ classdef OptimalController < handle
             obj.RCI_optimizer = obj.initRCIOptimizer(var_convh);
             
             obj.directionalFeasRegion = obj.initDirFeasRegion(var_convh);
-            obj.feasRegion = nan; % computation delayed (slow), used only for plots.
+            obj.feasRegion = nan; % computation (slow) delayed, as only used in plots
         end
         
         
         function feas_x0 = findFeasibleX0(obj, x0_des, costFun)
-            
+            % find the closest feasible initial state to the desired one
             weightSq2Norm = @(vector, mat) vector'*mat*vector;
             
-            % OCP_optimizer yalmip definitions
+            % OCP_optimizer YALMIP definitions
             x0=sdpvar(obj.sys.nx, 1,'full');
             y=sdpvar(obj.ccPoly.m, obj.N,'full');
-            u=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, obj.N,'full');
+            u=sdpvar(obj.sys.nu, obj.ccPoly.v, obj.N,'full');
             ys=sdpvar(obj.ccPoly.m, 1,'full');
-            us=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, 1,'full');
+            us=sdpvar(obj.sys.nu, obj.ccPoly.v, 1,'full');
             
             switch class(costFun)
                 case 'double'
@@ -75,7 +70,7 @@ classdef OptimalController < handle
                     error("Unexpected DataType: %s. Only 'double' and 'function_handle' accepted.",class(Stage_cost))
             end
             
-            % % Constraints (look Equation 17 from paper)
+            % % Constraints (look Equation (19) from paper)
             constr = [];
             
             % Initial condition
@@ -83,10 +78,10 @@ classdef OptimalController < handle
             
             % Stage + terminal constraints
             for k=1:obj.N-1
-                constr = [constr; 
+                constr = [constr;
                     obj.constrSetS(y(:,k), u(:,:,k), y(:,k+1),obj.sys.A_convh,obj.sys.B_convh )];
             end
-            constr = [constr; 
+            constr = [constr;
                 obj.constrSetS(y(:,obj.N), u(:,:,obj.N), obj.gamma*y(:,obj.N)+(1-obj.gamma)*ys,...
                 obj.sys.A_convh,obj.sys.B_convh)];
             
@@ -100,7 +95,7 @@ classdef OptimalController < handle
         
         
         function feasRegion = computeFeasRegion(obj, n_facets, varargin)
-            % compute a new feasible region for a template of #facets
+            % compute a new feasible region given a template of #facets
             % complexity. varargin used to pass new (A_convh, B_convh)
             H_feas = getTemplateMatrix(obj.sys.nx, n_facets);
             h_feas = zeros(size(H_feas,1),1);
@@ -122,13 +117,14 @@ classdef OptimalController < handle
     end
     
     
-    methods (Access = private)        
+    methods (Access = private)
         function ocpOptim = initOCPOptimizer(obj, var_convh)
+            % define the YALMIP optimizer for the main QP
             y=sdpvar(obj.ccPoly.m, obj.N,'full');
-            u=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, obj.N,'full');
+            u=sdpvar(obj.sys.nu, obj.ccPoly.v, obj.N,'full');
             x0=sdpvar(obj.sys.nx, 1,'full');
             ys=sdpvar(obj.ccPoly.m, 1,'full');
-            us=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, 1,'full');
+            us=sdpvar(obj.sys.nu, obj.ccPoly.v, 1,'full');
             r=sdpvar(obj.sys.ny ,1,'full');
             
             if var_convh
@@ -150,7 +146,7 @@ classdef OptimalController < handle
             end
             cost = cost + obj.costFunMan.cost_L_N(y(:,obj.N), u(:,:,obj.N), ys, us);
             
-            % % Constraints (look Equation 17 from paper)
+            % % Constraints (look Equation (19) from paper)
             constr = [];
             
             % Initial condition
@@ -194,8 +190,9 @@ classdef OptimalController < handle
         
         
         function rciOptim = initRCIOptimizer(obj, var_convh)
+            % define the YALMIP optimizer for the RCI set computation
             ys = sdpvar(obj.ccPoly.m, 1,'full');
-            us = sdpvar(obj.sys.nu, obj.ccPoly.m_bar,'full');
+            us = sdpvar(obj.sys.nu, obj.ccPoly.v,'full');
             r = sdpvar(obj.sys.ny, 1,'full');
             
             if var_convh
@@ -235,6 +232,8 @@ classdef OptimalController < handle
         
         
         function dirFeasRegion = initDirFeasRegion(obj, var_convh)
+            % define the YALMIP optimizer for maximization of the feasible
+            % region with respect to a specific facet
             c_vec = sdpvar(obj.sys.nx,1,'full');
             x0 = sdpvar(obj.sys.nx,1,'full');
             
@@ -242,9 +241,9 @@ classdef OptimalController < handle
             cost = -c_vec'*x0; % maximize the direction
             
             y=sdpvar(obj.ccPoly.m, obj.N,'full');
-            u=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, obj.N,'full');
+            u=sdpvar(obj.sys.nu, obj.ccPoly.v, obj.N,'full');
             ys=sdpvar(obj.ccPoly.m, 1,'full');
-            us=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, 1,'full');
+            us=sdpvar(obj.sys.nu, obj.ccPoly.v, 1,'full');
             
             if var_convh
                 A_sdp = {};
@@ -257,7 +256,7 @@ classdef OptimalController < handle
                 end
             end
             
-            % % Constraints (look Equation 17 from paper)
+            % % Constraints (look Equation (19) from paper)
             constr = [];
             
             % Initial condition
@@ -301,9 +300,9 @@ classdef OptimalController < handle
         
         
         function constr = constrSetS(obj,y,u,yp,A_convh,B_convh)
-            % define the Configuration Constrained RFIT set.
+            % define the Configuration-Constrained RFIT set.
             constr = [];
-            for j=1:obj.ccPoly.m_bar
+            for j=1:obj.ccPoly.v
                 for i=1:obj.sys.np % #models
                     constr = [constr;
                         obj.ccPoly.F*(A_convh{i}*obj.ccPoly.Vi_s{j}*y + B_convh{i}*u(:,j) )+ obj.ccPoly.d <= yp];

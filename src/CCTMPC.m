@@ -1,24 +1,26 @@
 classdef CCTMPC < handle
-    %CCTMPC Summary of this class goes here
-    %   Detailed explanation goes here
-    
+    % CCTMPC implementation. Based on OptimalController class. For clarity
+    % of presentation, the QP used for computing the closed-loop control 
+    % law is included in this class instead of solving a single QP. This
+    % class acts also as a wrapper for the OCP solver.
+        
     properties (SetAccess = private)
-        var_convh % Variable system matrices flag
+        var_convh % flag, enable variability for system convex hulls
         
         r_prev % reference at previous timestep. Needed to trigger RCI computation
-        ocpSol % cell array, solution from the main QP problem.
+        ocpSol % cell array, solution from the main QP problem
         rciSol % cell array, solution from RCI
         lambdaSol % solution of convex combination of the vertex control law
     end
     
     properties (Access = private)
         optController % YALMIP optimizer, Optimal Controller
-        mpcLaw % YALMIP optimizer, output the input in state (and not parameter) space
+        mpcLaw % YALMIP optimizer, compute the input in state (and not parameter) space
     end
     
     properties(Dependent)
-        Lyapunov_cost
-        feasRegion % Polytope, define the (approximated) feasible region for the MPC scheme
+        Lyapunov_cost % as defined in [(ii),Corollary 1] from paper
+        feasRegion % Polytope, (approximated) feasible region of the underlying OCP
     end
     
     methods % GETTER methods
@@ -34,17 +36,14 @@ classdef CCTMPC < handle
     
     methods (Access = public)
         function obj = CCTMPC(sys, ccPoly, CFM, N, gamma, sdp_opts, var_convh, useBasicOCP)
-            %CCTMPC Construct an instance of this class
-            %   Detailed explanation goes here
             if useBasicOCP
                 obj.optController = OptimalController_basic(sys, ccPoly, CFM, N, gamma, sdp_opts);
             else
-                obj.optController = OptimalController(sys, ccPoly, CFM, N, gamma, sdp_opts, var_convh);
-                
+                obj.optController = OptimalController(sys, ccPoly, CFM, N, gamma, sdp_opts, var_convh); 
             end
             obj.mpcLaw = obj.initMPCLaw();
             
-            obj.var_convh = var_convh; % Variable system matrices flag
+            obj.var_convh = var_convh;
             
             obj.r_prev = nan;
             obj.ocpSol = cell(5,1); % {y,u,ys,us,cost} fields
@@ -76,12 +75,13 @@ classdef CCTMPC < handle
         
 
         function feasRegion = computeFeasRegion(obj, n_facets, varargin)
+            % interface method to the underlying OCP class
             feasRegion = obj.optController.computeFeasRegion(n_facets, varargin{:});
         end
         
         
         function feasX0 = findFeasibleX0(obj,x_curr,varargin)
-            % interface method to the underlying OCP
+            % interface method to the underlying OCP class
             switch length(varargin)
                 case 0
                     feasX0 = obj.optController.findFeasibleX0(x_curr,eye(obj.optController.sys.nx));
@@ -98,7 +98,7 @@ classdef CCTMPC < handle
         function solve_fast(obj, x_curr, r_curr, varargin)
             % two possible varargin cases:
             % length(varargin)==0: for fixed systems, RCI computed only if
-            %       r_curr is different from previous one
+            %       current reference is different from previous one
             % length(varargin)==2: system dynamics (A_convh,B_convh) are
             %       updated; RCI always computed.
             switch length(varargin)
@@ -137,7 +137,7 @@ classdef CCTMPC < handle
         function solve_basic(obj, x_curr, r_curr, varargin)
             % two possible varargin cases:
             % length(varargin)==0: for fixed systems, RCI computed only if
-            %       r_curr is different from previous one
+            %       current reference is different from previous one
             % length(varargin)==2: system dynamics (A_convh,B_convh) are
             %       updated; RCI always computed.
             
@@ -163,36 +163,37 @@ classdef CCTMPC < handle
         
         
         function mpcLaw = initMPCLaw(obj)
+            % define the YALMIP optimizer for the control-law computation
             weightSq2Norm = @(vector, mat) vector'*mat*vector;
             
             m = obj.optController.ccPoly.m;
-            m_bar = obj.optController.ccPoly.m_bar;
+            v = obj.optController.ccPoly.v;
             nu = obj.optController.sys.nu;
             nx = obj.optController.sys.nx;
             Vi_s = obj.optController.ccPoly.Vi_s;
             
             y0Opt = sdpvar(m, 1,'full');
-            u0Opt = sdpvar(nu, m_bar,'full');
+            u0Opt = sdpvar(nu, v,'full');
             x0 = sdpvar(nx, 1,'full');
             
-            lambda = sdpvar(m_bar, 1,'full');
+            lambda = sdpvar(v, 1,'full');
             
             constr = [];
             constr = [constr; sum(lambda)==1; lambda >= 0];
             x_eq_sum = 0;
-            for j=1:m_bar
+            for j=1:v
                 x_eq_sum = x_eq_sum + lambda(j)*Vi_s{j}*y0Opt;
             end
             constr = [constr; x0 == x_eq_sum];
             
-            % cost = weightSq2Norm(lambda, eye(size(lambda,1))); % squared 2-norm
-            cost = nnz(lambda);
+            cost = weightSq2Norm(lambda, eye(size(lambda,1))); % squared 2-norm
+            % cost = nnz(lambda); % 0-norm
             
             mpcLaw = optimizer(constr, cost, ...
                 sdpsettings(obj.optController.sdp_opts{:}), ...
                 {x0, y0Opt, u0Opt}, ... % input parameters
                 {u0Opt*lambda, lambda} ... % output parameters
-                ); % (nu x m_bar) * (m_bar x 1) -> (nu x 1)
+                ); % (nu x v) * (v x 1) -> (nu x 1)
         end
         
     end

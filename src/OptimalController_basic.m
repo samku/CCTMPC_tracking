@@ -1,18 +1,19 @@
 classdef OptimalController_basic < handle
-    % The only difference here is the use of the yalmip method "optimize"
-    % instead of "optimizer". This lead to a simpler code (albeit less
-    % efficient), since the Dynamical System is an handle class whose
-    % system matrices are updated across all the instances.
+    % OCP as defined in Equation (19) from the paper. The main difference
+    % from the OptimalController class is the use of "optimize" function 
+    % instead of "optimizer" from YALMIP. This leads to a simpler but less 
+    % efficient code, as DynSystem is an handle class whose system matrices
+    % are updated across all the instances.
     
     properties (SetAccess = private)
         sys % dynamical system
         N % prediction horizon length
-        ccPoly % Configuration constrained poly
-        sdp_opts % options related to SDPVar (solver, verbosity...)
+        ccPoly % Configuration-Constrained Polytope
+        sdp_opts % YALMIP optimizer options (solver, verbosity...)
         costFunMan % support class for cost function definition
-        gamma % user specified value
+        gamma % user specified discount factor
         
-        feasRegion % Polytope, define the (approximated) feasible region for the OCP scheme
+        feasRegion % Polytope, (approximated) feasible region for the OCP
     end
     
     methods % GETTER methods
@@ -36,19 +37,20 @@ classdef OptimalController_basic < handle
             obj.gamma = gamma;
             obj.sdp_opts = sdp_opts;
             
-            obj.feasRegion = nan; % computation delayed (slow), used only for plots.
+            obj.feasRegion = nan; % computation (slow) delayed, as only used in plots
         end
         
         function feas_x0 = findFeasibleX0(obj, x0_des, costFun)
+            % find the closest feasible initial state to the desired one
             
             weightSq2Norm = @(vector, mat) vector'*mat*vector;
             
-            % optContr yalmip definitions
+            % OCP_optimizer YALMIP definitions
             x0=sdpvar(obj.sys.nx, 1,'full');
             y=sdpvar(obj.ccPoly.m, obj.N,'full');
-            u=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, obj.N,'full');
+            u=sdpvar(obj.sys.nu, obj.ccPoly.v, obj.N,'full');
             ys=sdpvar(obj.ccPoly.m, 1,'full');
-            us=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, 1,'full');
+            us=sdpvar(obj.sys.nu, obj.ccPoly.v, 1,'full');
             
             switch class(costFun)
                 case 'double'
@@ -59,7 +61,7 @@ classdef OptimalController_basic < handle
                     error("Unexpected DataType: %s. Only 'double' and 'function_handle' accepted.",class(Stage_cost))
             end
             
-            % % Constraints (look Equation 17 from paper)
+            % % Constraints (look Equation (19) from paper)
             constr = [];
             
             % Initial condition
@@ -74,16 +76,18 @@ classdef OptimalController_basic < handle
             % RCI constraint
             constr = [constr; obj.constrSetS(ys, us, ys)];
             
+            % solve the OCP
             optimize(constr,cost,sdpsettings(obj.sdp_opts{:}));
             feas_x0 = value(x0);
         end
         
         
         function ocpSol = OCP_optimizer(obj, x0, r)
+            % compute the main QP solution
             y=sdpvar(obj.ccPoly.m, obj.N,'full');
-            u=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, obj.N,'full');
+            u=sdpvar(obj.sys.nu, obj.ccPoly.v, obj.N,'full');
             ys=sdpvar(obj.ccPoly.m, 1,'full');
-            us=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, 1,'full');
+            us=sdpvar(obj.sys.nu, obj.ccPoly.v, 1,'full');
             
             % % Cost Function
             theta_s = sdpvar(obj.sys.nu,1);
@@ -93,7 +97,7 @@ classdef OptimalController_basic < handle
             end
             cost = cost + obj.costFunMan.cost_L_N(y(:,obj.N), u(:,:,obj.N), ys, us);
             
-            % % Constraints (look Equation 17 from paper)
+            % % Constraints (look Equation (19) from paper)
             constr = [];
             
             % Initial condition
@@ -117,8 +121,9 @@ classdef OptimalController_basic < handle
         
         
         function rciSol = RCI_optimizer(obj, r)
+            % compute the RCI set solution
             ys = sdpvar(obj.ccPoly.m, 1,'full');
-            us = sdpvar(obj.sys.nu, obj.ccPoly.m_bar,'full');
+            us = sdpvar(obj.sys.nu, obj.ccPoly.v,'full');
             
             % % Cost function
             theta_s = sdpvar(obj.sys.nu, 1,'full');
@@ -136,22 +141,22 @@ classdef OptimalController_basic < handle
         
         
         function feasRegion = computeFeasRegion(obj, n_facets)
-            % compute a new feasible region for a template of #facets
+            % compute a new feasible region given a template of #facets
             % complexity.
             H_feas = getTemplateMatrix(obj.sys.nx, n_facets);
             h_feas = zeros(size(H_feas,1),1);
             
             x0 = sdpvar(obj.sys.nx,1,'full');
             y=sdpvar(obj.ccPoly.m, obj.N,'full');
-            u=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, obj.N,'full');
+            u=sdpvar(obj.sys.nu, obj.ccPoly.v, obj.N,'full');
             ys=sdpvar(obj.ccPoly.m, 1,'full');
-            us=sdpvar(obj.sys.nu, obj.ccPoly.m_bar, 1,'full');
+            us=sdpvar(obj.sys.nu, obj.ccPoly.v, 1,'full');
             
             for i=1:size(H_feas,1)                
                 % cost function
                 cost = -H_feas(i,:)*x0; % maximize the direction
                 
-                % % Constraints (look Equation 17 from paper)
+                % % Constraints (look Equation (19) from paper)
                 constr = [];
                 
                 % Initial condition
@@ -183,7 +188,7 @@ classdef OptimalController_basic < handle
             % NOTE: if the system convex hulls are updated, the constraints
             % do it accordingly
             constr = [];
-            for j=1:obj.ccPoly.m_bar
+            for j=1:obj.ccPoly.v
                 for i=1:obj.sys.np % #models
                     constr = [constr;
                         obj.ccPoly.F*(obj.sys.A_convh{i}*obj.ccPoly.Vi_s{j}*y + obj.sys.B_convh{i}*u(:,j) )+ obj.ccPoly.d <= yp];

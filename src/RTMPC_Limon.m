@@ -1,21 +1,21 @@
 classdef RTMPC_Limon < handle
     % Rigid Tube MPC formulation for set-point tracking, based on Limon's 
     % paper implementation. For this reason, it can be used only with LTI 
-    % systems. Differently from the original formulation, we still use the
-    % parameter space (and not only the state space) to have a fairer
-    % comparison.
+    % systems. Differently from the original formulation, we also use the
+    % parameter space (and not only the state space), giving us a fairer
+    % comparison with our method.
     
     properties (SetAccess = private)        
         optContrSol % struct, solution from OCP
         
-        feasRegion % Polytope, define the (approximated) feasible region for the MPC scheme
+        feasRegion % Polytope, (approximated) feasible region for the OCP
         
-        sys % system dynamics and constraints
+        sys % dynamical system 
         ccPoly % vertex and parameters from the CCPolytope are used for comparison
         costMats % struct that aggregates all the relevant matrices for the system
         N % prediction horizon for the OCP
-        lambda % user defined discount factor for the terminal set
-        sdp_opts % options related to SDPVar (solver, verbosity...)
+        lambda % computing a tight approx. of the mRPI set as terminal set
+        sdp_opts % YALMIP optimizer options (solver, verbosity...)
         
         y_mRPI, u_mRPI
         termSetAug, hX_tight, hU_tight
@@ -24,10 +24,10 @@ classdef RTMPC_Limon < handle
     
     properties (Access = private)
         optController % YALMIP optimizer, Optimal Controller
-        mpcLaw % YALMIP optimizer, output the input in state (and not parameter) space
+        mpcLaw % YALMIP optimizer, compute the input in state (and not parameter) space
         
         directionalFeasRegion % YALMIP optimizer, compute the farthest feasible
-        % initial condition with respect to a specific facet.
+        % initial state with respect to a specific facet.
     end
     
     properties(Dependent)
@@ -44,7 +44,7 @@ classdef RTMPC_Limon < handle
                 feasReg = obj.feasRegion;
             else
                 % Hard-coded #facets, often enough to get a good approximation
-                obj.feasRegion = obj.computeFeasRegion(200);
+                obj.feasRegion = obj.computeFeasRegion(100);
                 feasReg = obj.feasRegion;
             end
         end
@@ -65,8 +65,8 @@ classdef RTMPC_Limon < handle
             % struct{Qv_(y/u)p, Qv_(x/u), Qc_(y/u)p, Qc_(x/u), Qr}
             obj.costMats = obj.computeCostMats(costMatricesSS); %{Qv, Qc, Qr}
             
-            % compute terminal set. Note that some class attributes are 
-            % instantiated inside the method.
+            % compute terminal set for [z;theta]. Note that some class
+            % attributes are instantiated inside the method.
             obj.termSetAug = obj.computeTerminalSet();
             
             % instantiate YALMIP optimizers
@@ -76,7 +76,7 @@ classdef RTMPC_Limon < handle
             obj.optContrSol = cell(4,1); % {y,u,theta,cost} fields
 
             obj.directionalFeasRegion = obj.initDirFeasRegion();
-            obj.feasRegion = nan; % computation delayed (slow), used only for plots.
+            obj.feasRegion = nan; % computation (slow) delayed, as only used in plots
         end
         
         
@@ -96,10 +96,11 @@ classdef RTMPC_Limon < handle
         
         
         function feas_x0 = findFeasibleX0(obj, x0_des, costFun)
+            % find the closest feasible initial state to the desired one
             weightSq2Norm = @(vector, mat) vector'*mat*vector;
             Mx = obj.M(1:obj.sys.nx,:); Mu = obj.M(obj.sys.nx+1:end,:);
             
-            % optContr yalmip definitions
+            % optContr YALMIP definitions
             theta = sdpvar(obj.sys.nu, 1,'full');
             x0 = sdpvar(obj.sys.nx, 1, 'full');
             x = sdpvar(obj.sys.nx, obj.N,'full');
@@ -136,8 +137,7 @@ classdef RTMPC_Limon < handle
         
         
         function feasRegion = computeFeasRegion(obj, n_facets)
-            % compute a new feasible region for a template of #facets
-            % complexity.
+            % compute a new feasible region given a template of #facets complexity.
             H_stab = getTemplateMatrix(obj.sys.nx, n_facets);
             h_stab = zeros(size(H_stab,1),1);
             
@@ -160,7 +160,7 @@ classdef RTMPC_Limon < handle
             HX = obj.sys.X.A; hX = obj.sys.X.b;
             HU = obj.sys.U.A; hU = obj.sys.U.b;
             
-            % compute mRPI facets from CCPolytope.
+            % compute mRPI facets from CCPolytope
             [obj.y_mRPI, obj.u_mRPI] = obj.get_mRPI_facets();
 
             % compute the steady-state subspace
@@ -187,8 +187,6 @@ classdef RTMPC_Limon < handle
                 uu = cplexlp(-HU(i,:)',HU_mRPI,hU_mRPI);
                 obj.hU_tight(i) = hU(i) - HU(i,:)*uu;
             end
-%             obj.hX_tight = hX - Polyhedron(obj.ccPoly.F, obj.y_mRPI).support(-HX');
-%             obj.hU_tight = hU - Polyhedron(obj.u_mRPI').support(-HU');
             
             % Compute the augmented constraint set
             H_aug = [HX, zeros(size(HX,1),nu);
@@ -272,17 +270,17 @@ classdef RTMPC_Limon < handle
             u0Opt = sdpvar(obj.sys.nu, 1,'full'); % open-loop control component (OCP solution)
             x_t = sdpvar(obj.sys.nx, 1,'full'); % current state of the system
             
-            thetas = sdpvar(obj.ccPoly.m_bar, 1,'full');
+            thetas = sdpvar(obj.ccPoly.v, 1,'full');
             
             constr = [];
             constr = [constr; sum(thetas)==1; thetas >= 0];
             
             x_vert = [];
-            for k=1:obj.ccPoly.m_bar
+            for k=1:obj.ccPoly.v
                 x_vert = [x_vert, obj.ccPoly.Vi_s{k}*(obj.y_mRPI+obj.ccPoly.F*x0Opt)];
             end
             
-            u_vert = repmat(u0Opt,1,obj.ccPoly.m_bar) + obj.u_mRPI; 
+            u_vert = repmat(u0Opt,1,obj.ccPoly.v) + obj.u_mRPI; 
             
             constr = [constr; x_t == x_vert*thetas];
             
@@ -292,7 +290,7 @@ classdef RTMPC_Limon < handle
             mpcLaw = optimizer(constr, cost, sdpsettings(obj.sdp_opts{:}), ...
                 {x_t, x0Opt, u0Opt}, ... % input parameters
                 {u_vert*thetas} ... % output parameters
-                ); % (nu x m_bar) * (m_bar x 1) -> (nu x 1)
+                ); % (nu x v) * (v x 1) -> (nu x 1)
         end
         
         
@@ -336,13 +334,13 @@ classdef RTMPC_Limon < handle
             weightSq2Norm = @(vector, mat) vector'*mat*vector;
             
             ys = sdpvar(obj.ccPoly.m, 1,'full');
-            us = sdpvar(obj.sys.nu, obj.ccPoly.m_bar,'full');
+            us = sdpvar(obj.sys.nu, obj.ccPoly.v,'full');
             
             % define constraints
             constr = [];
             constr = [constr; obj.ccPoly.E*ys <= 0];
             
-            for k = 1:obj.ccPoly.m_bar
+            for k = 1:obj.ccPoly.v
                 % Robust Forward Invariant constraint
                 constr = [constr; obj.ccPoly.F*(A*obj.ccPoly.Vi_s{k}*ys + B*us(:,k)) + obj.ccPoly.d <= ys];
                 % state and input constraints
@@ -363,14 +361,13 @@ classdef RTMPC_Limon < handle
         
         function costMats = computeCostMats(obj, costMatricesSS)
             % from the constructor, we pass the cost matrices defined in
-            % the state space (called here Q*_x/u,*=c,v). Due to comparison
-            % reasons, we must redefine the system in the parameter space,
-            % so transformations must be carried out. For this reason, we
-            % save all the matrices in a single struct.
+            % the state space (called here Q*_x/u,*=c,v). For comparison
+            % purposes, we redefine the system in the parameter space. All 
+            % the matrices are saved in a single struct.
             
             % frequently used constant throughout function
             nx = obj.sys.nx; nu = obj.sys.nu;
-            m = obj.ccPoly.m; m_bar = obj.ccPoly.m_bar;
+            m = obj.ccPoly.m; v = obj.ccPoly.v;
             
             % define the cost struct
             costMats = struct;
@@ -381,18 +378,18 @@ classdef RTMPC_Limon < handle
             
             % CCPolytope volume cost (in parameter space)
             V_bar = mean(cat(3, obj.ccPoly.Vi_s{:}), 3); % each Vi_s{i} is a 2D matrix, averaging along 3rd dim.
-            U_bar = (1/m_bar)*repmat(eye(nu),1,m_bar); % nu x (nu*m_bar)
+            U_bar = (1/v)*repmat(eye(nu),1,v); % nu x (nu*v)
             
             Qv_yp = zeros(m,m);
-            for i = 1:m_bar
+            for i = 1:v
                 Qv_yp = Qv_yp + (obj.ccPoly.Vi_s{i}-V_bar)'*costMats.Qv_x*(obj.ccPoly.Vi_s{i}-V_bar);
             end
             costMats.Qv_yp = Qv_yp;
             
-            Qv_up = zeros(nu*m_bar, nu*m_bar);
+            Qv_up = zeros(nu*v, nu*v);
             Iu_mats = {};
-            for i = 1:m_bar
-                Iu_mats{i} = sparse(nu,nu*m_bar);
+            for i = 1:v
+                Iu_mats{i} = sparse(nu,nu*v);
                 Iu_mats{i}(:,(i-1)*nu+1:i*nu) = eye(nu);
                 Qv_up = Qv_up + (Iu_mats{i}-U_bar)'*costMats.Qv_u*(Iu_mats{i}-U_bar);
             end
