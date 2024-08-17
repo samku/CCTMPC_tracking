@@ -34,10 +34,11 @@ U = Polyhedron([eye(nu); -eye(nu)], repmat([10*pi/180; 2],2,1) );
 W_dist = Ts*Bw*Polyhedron([eye(nw); -eye(nw)], [(10)^2;0]);
 
 % LPV system representation (enclosed in the convex hull above defined)
-A_curr_han = @(A_convh,vx) vx*A_is{1} + (1/vx)*A_is{2} + A_is{3};
-B_curr_han = @(B_convh,vx) vx*B_is{1} + (1/vx)*B_is{2} + B_is{3};
+% ext_params = [vx] (longitudinal speed)
+A_curr_han = @(x,vx) vx*A_is{1} + (1/vx)*A_is{2} + A_is{3};
+B_curr_han = @(x,vx) vx*B_is{1} + (1/vx)*B_is{2} + B_is{3};
 
-sys = DynSystem(A_convh, B_convh, C, D, X, U, W_dist,A_curr_han,B_curr_han);
+sys = qLPV_System(A_convh, B_convh, C, D, X, U, W_dist,A_curr_han,B_curr_han);
 
 % compute a Configuration-Constrained polytope
 C_tilde = [eye(nx); -eye(nx)];
@@ -103,7 +104,7 @@ for t = 1:N_mpc
     w_sys(:,t) = W_dist.randomPoint();
     
     % propagate system dynamics
-    x_sys(:,t+1) = sys.A_curr(longDyn.vx(t))*x_sys(:,t) + sys.B_curr(longDyn.vx(t))*u_sys(:,t) + w_sys(:,t);
+    x_sys(:,t+1) = sys.step_nominal(x_sys(:,t), u_sys(:,t), longDyn.vx(t)) + w_sys(:,t);
     
     % save computed data
     [OCP_y{t}, OCP_u{t}, OCP_ys{t}, OCP_us{t}] = cctmpc.ocpSol{:};

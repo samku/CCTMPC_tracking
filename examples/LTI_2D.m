@@ -35,11 +35,11 @@ U = Polyhedron(HU, hU);
 
 W_dist = Bw*Polyhedron(HW, hW);
 
-% since it's an LTI system, we ignore additional parameters
-A_curr_han = @(A_convh,params) A_convh{1};
-B_curr_han = @(B_convh,params) B_convh{1};
+% since it's an LTI system, we ignore both state and external parameters
+A_curr_han = @(x, ext_params) A_convh{1};
+B_curr_han = @(x, ext_params) B_convh{1};
 
-sys = DynSystem(A_convh, B_convh, C, D, X, U, W_dist,A_curr_han,B_curr_han);
+sys = qLPV_System(A_convh, B_convh, C, D, X, U, W_dist,A_curr_han,B_curr_han);
 
 % By using polar coordinates for parameterization, we ensure to get a 
 % CCPolytope with minimal representation, i.e. v = m
@@ -106,8 +106,8 @@ for t = 1:N_mpc
     w_sys(:,t) = getWorstCaseDist(sys, x_sys(:,t), u_sys(:,t));
     
     % propagate system dynamics
-    x_sys(:,t+1) = sys.A_curr()*x_sys(:,t) + sys.B_curr()*u_sys(:,t) + w_sys(:,t);
-    
+    x_sys(:,t+1) = sys.step_nominal(x_sys(:,t), u_sys(:,t)) + w_sys(:,t);
+
     % save computed data
     [OCP_y{t}, OCP_u{t}, OCP_ys{t}, OCP_us{t}] = cctmpc.ocpSol{:};
     [RCI_ys{t}, RCI_us{t}] = cctmpc.rciSol{:};
