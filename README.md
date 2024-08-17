@@ -28,12 +28,14 @@ If you find this package useful, please consider giving this repository a **star
 If our work has contributed to your research, we kindly ask you to acknowledge it by citing our paper.
 ### <a id="1">[1]</a> CCTMPC for Tracking
 ```latex
-@misc{badalamenti2024configurationconstrained,
-      title={Configuration-Constrained Tube MPC for Tracking}, 
-      author={Filippo Badalamenti and Sampath Kumar Mulagaleti and Alberto Bemporad and Boris Houska and Mario Eduardo Villanueva},
-      year={2024},
-      eprint={2405.03629},
-      archivePrefix={arXiv},
-      primaryClass={eess.SY}
+@ARTICLE{10546969,
+  author={Badalamenti, Filippo and Mulagaleti, Sampath Kumar and Bemporad, Alberto and Houska, Boris and Villanueva, Mario Eduardo},
+  journal={IEEE Control Systems Letters}, 
+  title={Configuration-Constrained Tube MPC for Tracking}, 
+  year={2024},
+  volume={8},
+  number={},
+  pages={1174-1179},
+  doi={10.1109/LCSYS.2024.3408750}
 }
 ```
